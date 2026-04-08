@@ -26,7 +26,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 from app.core.config import settings
 from app.core.backend_client import BackendClient
-from app.tools.backend_tools import build_kora_tools
+from app.tools.Backend_tools import build_kora_tools
 from app.schemas.schemas import KoraChatRequest, KoraChatResponse, ActionCard
 
 

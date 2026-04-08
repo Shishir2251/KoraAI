@@ -85,7 +85,7 @@ class TestBackendTools:
     @respx.mock
     async def test_get_appointment_summary_today(self):
         from app.core.backend_client import BackendClient
-        from app.tools.backend_tools import build_kora_tools
+        from app.tools.Backend_tools import build_kora_tools
 
         today = datetime.now().strftime("%Y-%m-%d")
         org = uuid.UUID(ORG_ID)
@@ -116,7 +116,7 @@ class TestBackendTools:
     @respx.mock
     async def test_get_appointments_filters(self):
         from app.core.backend_client import BackendClient
-        from app.tools.backend_tools import build_kora_tools
+        from app.tools.Backend_tools import build_kora_tools
 
         org = uuid.UUID(ORG_ID)
 
@@ -142,7 +142,7 @@ class TestBackendTools:
     @respx.mock
     async def test_get_available_slots(self):
         from app.core.backend_client import BackendClient
-        from app.tools.backend_tools import build_kora_tools
+        from app.tools.Backend_tools import build_kora_tools
 
         org = uuid.UUID(ORG_ID)
         svc_id = str(uuid.uuid4())
@@ -171,7 +171,7 @@ class TestBackendTools:
     @respx.mock
     async def test_get_services(self):
         from app.core.backend_client import BackendClient
-        from app.tools.backend_tools import build_kora_tools
+        from app.tools.Backend_tools import build_kora_tools
 
         org = uuid.UUID(ORG_ID)
         respx.get(f"{BACKEND_URL}/api/v1/services").mock(
@@ -193,7 +193,7 @@ class TestBackendTools:
     @respx.mock
     async def test_cancel_appointment(self):
         from app.core.backend_client import BackendClient
-        from app.tools.backend_tools import build_kora_tools
+        from app.tools.Backend_tools import build_kora_tools
 
         org = uuid.UUID(ORG_ID)
         appt_id = str(uuid.uuid4())
@@ -212,7 +212,7 @@ class TestBackendTools:
     @respx.mock
     async def test_backend_error_handled_gracefully(self):
         from app.core.backend_client import BackendClient
-        from app.tools.backend_tools import build_kora_tools
+        from app.tools.Backend_tools import build_kora_tools
 
         org = uuid.UUID(ORG_ID)
         respx.get(f"{BACKEND_URL}/api/v1/appointments").mock(

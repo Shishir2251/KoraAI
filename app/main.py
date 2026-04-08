@@ -10,13 +10,16 @@ from app.core.config import settings
 from app.api.v1.router import api_router
 from app.schemas.schemas import HealthResponse
 
+
+# ------------------ Logging ------------------
 logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL),
+    level=getattr(logging, settings.LOG_LEVEL, "INFO"),
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
 logger = logging.getLogger("koraai_agent")
 
 
+# ------------------ Lifespan ------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION} [{settings.ENVIRONMENT}]")
@@ -25,6 +28,13 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down")
 
 
+# ------------------ Docs Control ------------------
+docs_url = "/docs" if settings.DEBUG else None
+redoc_url = "/redoc" if settings.DEBUG else None
+openapi_url = "/openapi.json" if settings.DEBUG else None
+
+
+# ------------------ App Init ------------------
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
@@ -32,12 +42,14 @@ app = FastAPI(
         "KoraAI Agent — LangChain-powered AI assistant that calls your backend API. "
         "Employees and owners can query appointments, schedules, and more in natural language."
     ),
-    docs_url="/docs" if settings.DEBUG else None,
-    redoc_url="/redoc" if settings.DEBUG else None,
-    openapi_url="/openapi.json" if settings.DEBUG else None,
+    docs_url=docs_url,
+    redoc_url=redoc_url,
+    openapi_url=openapi_url,
     lifespan=lifespan,
 )
 
+
+# ------------------ CORS ------------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS,
@@ -47,6 +59,7 @@ app.add_middleware(
 )
 
 
+# ------------------ Request Logger ------------------
 @app.middleware("http")
 async def request_logger(request: Request, call_next):
     start = time.time()
@@ -56,6 +69,7 @@ async def request_logger(request: Request, call_next):
     return response
 
 
+# ------------------ Exception Handlers ------------------
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(request: Request, exc: RequestValidationError):
     errors = [
@@ -77,14 +91,23 @@ async def global_error_handler(request: Request, exc: Exception):
     )
 
 
-app.include_router(api_router)
+# ------------------ Routes ------------------
+app.include_router(api_router, prefix="/api/v1")
 
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
 async def health():
-    return HealthResponse(status="healthy", app=settings.APP_NAME, version=settings.APP_VERSION)
+    return HealthResponse(
+        status="healthy",
+        app=settings.APP_NAME,
+        version=settings.APP_VERSION,
+    )
 
 
 @app.get("/", tags=["Root"])
 async def root():
-    return {"message": f"{settings.APP_NAME} API", "version": settings.APP_VERSION}
+    return {
+        "message": f"{settings.APP_NAME} API",
+        "version": settings.APP_VERSION,
+        "docs": "/docs" if settings.DEBUG else "disabled",
+    }
