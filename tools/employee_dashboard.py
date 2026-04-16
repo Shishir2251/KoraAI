@@ -7,41 +7,89 @@ from datetime import date
 def get_my_appointments_today() -> str:
     """
     Get the logged-in employee's appointments for today.
-    No input needed.
+    No input needed — the bearer token identifies the employee.
     """
     today = date.today().strftime("%Y-%m-%d")
 
     result = api_get(
-        "/api/v1/schedule/",
-        params={"date": today, "status": "all"}
+        "/api/v1/appointment/",
+        params={"status": "all"}
     )
 
     if "error" in result:
         return f"Could not fetch appointments: {result['error']}"
 
-    schedules = (
+    all_appointments = (
         result.get("data")
-        or result.get("schedules")
+        or result.get("appointments")
         or []
     )
 
-    if not schedules:
+    if isinstance(all_appointments, dict):
+        all_appointments = (
+            all_appointments.get("data")
+            or all_appointments.get("appointments")
+            or []
+        )
+
+    # Filter for today
+    todays = [
+        a for a in all_appointments
+        if a.get("appointmentDate", a.get("date", "")).startswith(today)
+    ]
+
+    if not todays:
         return f"You have no appointments today ({today})."
 
     lines = []
-    for s in schedules:
-        for slot in s.get("slots", []):
-            lines.append(
-                f"  {slot.get('startTime','N/A')} - {slot.get('endTime','N/A')} "
-                f"| {slot.get('summary','Appointment')} "
-                f"| Status: {slot.get('status','N/A')}"
-            )
+    for a in todays:
+        lines.append(
+            f"  - {a.get('startTime','N/A')} to {a.get('endTime','N/A')} "
+            f"| Status: {a.get('status','N/A').upper()} "
+            f"| Notes: {a.get('bookingNotes', a.get('notes','None'))} "
+            f"| ID: {a.get('_id','N/A')}"
+        )
 
-    count = len(lines)
     return (
-        f"You have {count} appointment(s) today ({today}):\n"
+        f"You have {len(lines)} appointment(s) today ({today}):\n"
         + "\n".join(lines)
     )
+
+
+@tool
+def get_my_appointment_calendar(month: str, year: str) -> str:
+    """
+    Get the employee's appointment calendar for a given month and year.
+    Inputs:
+      month — number e.g. '4' for April
+      year  — full year e.g. '2026'
+    """
+    result = api_get(
+        "/api/v1/appointment/employee/calendar",
+        params={"month": month, "year": year}
+    )
+
+    if "error" in result:
+        return f"Could not fetch calendar: {result['error']}"
+
+    data = result.get("data", result.get("calendar", []))
+
+    if not data:
+        return f"No calendar data found for {month}/{year}."
+
+    if isinstance(data, list):
+        lines = []
+        for day in data:
+            date_str   = day.get("date", "N/A")
+            appts      = day.get("appointments", day.get("slots", []))
+            count      = len(appts)
+            if count > 0:
+                lines.append(f"  {date_str}: {count} appointment(s)")
+        if not lines:
+            return f"No appointments in {month}/{year}."
+        return f"Your calendar for {month}/{year}:\n" + "\n".join(lines)
+
+    return f"Calendar data: {str(data)[:500]}"
 
 
 @tool
@@ -55,11 +103,7 @@ def get_my_leave_status() -> str:
     if "error" in result:
         return f"Could not fetch leave: {result['error']}"
 
-    leaves = (
-        result.get("data")
-        or result.get("leaves")
-        or []
-    )
+    leaves = result.get("data") or result.get("leaves") or []
 
     if not leaves:
         return "You have no leave applications on record."
@@ -79,7 +123,7 @@ def get_my_leave_status() -> str:
 @tool
 def get_my_leave_balance() -> str:
     """
-    Get remaining leave days for the logged-in employee.
+    Get remaining leave balance for the logged-in employee.
     No input needed.
     """
     result = api_get("/api/v1/work/leave-balance")
@@ -100,8 +144,8 @@ def get_my_leave_balance() -> str:
 @tool
 def get_single_leave_status(leave_id: str) -> str:
     """
-    Get the status of one specific leave application.
-    Input: leave_id — the MongoDB _id of the leave request.
+    Get status of one specific leave application.
+    Input: leave_id — MongoDB _id of the leave request.
     """
     result = api_get(f"/api/v1/work/leave/{leave_id}")
 

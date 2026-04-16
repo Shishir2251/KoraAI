@@ -1,271 +1,277 @@
 from langchain.tools import tool
 from api_client import api_get, api_post, api_patch
-from datetime import date as date_lib
 
 
 @tool
-def check_availability(date: str) -> str:
+def get_available_slots(employee_id: str, date: str) -> str:
     """
-    Check available appointment slots for a specific date or whole month.
-    Input examples:
-      - specific date : '2026-04-15'
-      - whole month   : '2026-04' 
-    Returns booked and available slots.
-    """
-    # Decide if input is a full date or just a month
-    if len(date.strip()) == 7:
-        # Month format — use calendar endpoint
-        result = api_get(
-            "/api/v1/schedule/calendar",
-            params={"month": date.strip()}
-        )
-        if "error" in result:
-            return f"Could not fetch calendar: {result['error']}"
-
-        data = (
-            result.get("data")
-            or result.get("calendar")
-            or []
-        )
-        if not data:
-            return f"No schedule data found for {date}."
-
-        lines = []
-        for day in data:
-            day_date = day.get("date", "")
-            slots    = day.get("slots", [])
-            booked   = [s for s in slots if s.get("status") in ["booked","in_progress","completed"]]
-            free     = len(slots) - len(booked)
-            if free > 0:
-                times = [
-                    f"{s.get('startTime','?')}-{s.get('endTime','?')}"
-                    for s in slots
-                    if s.get("status") not in ["booked","in_progress","completed"]
-                ]
-                lines.append(f"  {day_date}: {', '.join(times)}")
-
-        if not lines:
-            return f"No free slots found in {date}. Fully booked."
-
-        return f"Available slots in {date}:\n" + "\n".join(lines)
-
-    else:
-        # Specific date — use schedule list with date filter
-        result = api_get(
-            "/api/v1/schedule/",
-            params={"date": date.strip(), "status": "all"}
-        )
-        if "error" in result:
-            return f"Could not fetch schedule: {result['error']}"
-
-        schedules = (
-            result.get("data")
-            or result.get("schedules")
-            or []
-        )
-
-        if not schedules:
-            return f"No appointments found on {date}. The day looks fully open!"
-
-        booked_times = []
-        for s in schedules:
-            for slot in s.get("slots", []):
-                status = slot.get("status", "")
-                if status in ["booked", "in_progress"]:
-                    booked_times.append(
-                        f"  {slot.get('startTime','?')} - {slot.get('endTime','?')} "
-                        f"[{status}]"
-                    )
-
-        if not booked_times:
-            return f"No booked slots on {date}. Fully available!"
-
-        return (
-            f"Schedule for {date}:\n"
-            f"Booked slots:\n" + "\n".join(booked_times) + "\n\n"
-            f"Ask your business owner what times are open for new bookings."
-        )
-
-
-@tool
-def get_all_schedules() -> str:
-    """
-    Get all scheduled appointments.
-    No input needed.
-    """
-    result = api_get("/api/v1/schedule/")
-
-    if "error" in result:
-        return f"Could not fetch schedules: {result['error']}"
-
-    schedules = (
-        result.get("data")
-        or result.get("schedules")
-        or []
-    )
-
-    if not schedules:
-        return "No schedules found."
-
-    lines = []
-    for s in schedules:
-        slots = s.get("slots", [])
-        slot_times = [
-            f"{sl.get('startTime','?')}-{sl.get('endTime','?')} ({sl.get('status','?')})"
-            for sl in slots
-        ]
-        lines.append(
-            f"- Date: {s.get('date','N/A')} "
-            f"| ID: {s.get('_id','N/A')} "
-            f"| Slots: {', '.join(slot_times)}"
-        )
-
-    return f"All schedules ({len(lines)}):\n" + "\n".join(lines)
-
-
-@tool
-def get_appointments_by_date(date: str, status: str = "all") -> str:
-    """
-    Get appointments for a specific date.
+    Check available time slots for a specific employee on a specific date.
+    This is STEP 1 — always call this before booking.
     Inputs:
-      date   — YYYY-MM-DD e.g. '2026-04-15'
-      status — 'all', 'upcoming', or 'completed' (default: 'all')
+      employee_id — the MongoDB _id of the employee (required)
+      date        — date in YYYY-MM-DD format e.g. '2026-04-20'
     """
     result = api_get(
-        "/api/v1/schedule/",
-        params={"date": date, "status": status}
+        "/api/v1/appointment/available-slots",
+        params={"employee": employee_id, "date": date}
+    )
+
+    if "error" in result:
+        return (
+            f"Could not fetch available slots.\n"
+            f"Error: {result['error']}\n"
+            f"Make sure employee_id and date are correct."
+        )
+
+    data = result.get("data", result.get("slots", result.get("availableSlots", [])))
+
+    if not data:
+        return f"No available slots found for employee {employee_id} on {date}. They may be fully booked."
+
+    # Handle list of slot strings or dicts
+    if isinstance(data, list) and len(data) > 0:
+        if isinstance(data[0], str):
+            slots_display = "\n".join([f"  - {s}" for s in data])
+        else:
+            slots_display = "\n".join([
+                f"  - {s.get('startTime','?')} to {s.get('endTime','?')}"
+                for s in data
+            ])
+    else:
+        slots_display = str(data)
+
+    return (
+        f"Available slots for employee {employee_id} on {date}:\n"
+        f"{slots_display}\n\n"
+        f"To book, say: 'Book appointment on {date} from [startTime] to [endTime]'"
+    )
+
+
+@tool
+def create_appointment(
+    employee_id: str,
+    appointment_date: str,
+    start_time: str,
+    end_time: str,
+    booking_notes: str = "",
+) -> str:
+    """
+    Book a new appointment with an employee.
+    IMPORTANT: Always call get_available_slots first to confirm the slot is free.
+    Inputs:
+      employee_id      — MongoDB _id of the employee e.g. '69df23bd857943bd90be03fb'
+      appointment_date — date in YYYY-MM-DD format e.g. '2026-04-20'
+      start_time       — e.g. '10:00 AM'
+      end_time         — e.g. '11:00 AM'
+      booking_notes    — optional notes e.g. 'Haircut, short on sides'
+    """
+    body = {
+        "employee":        employee_id,
+        "appointmentDate": appointment_date,
+        "startTime":       start_time,
+        "endTime":         end_time,
+        "bookingNotes":    booking_notes,
+    }
+
+    result = api_post("/api/v1/appointment/", body)
+
+    if "error" in result:
+        return (
+            f"Booking failed.\n"
+            f"Error: {result['error']}\n"
+            f"Please check the employee ID, date and time are correct."
+        )
+
+    data = result.get("data", result)
+    appt_id = data.get("_id", "N/A") if isinstance(data, dict) else "N/A"
+
+    return (
+        f"Appointment booked successfully!\n"
+        f"Date          : {appointment_date}\n"
+        f"Time          : {start_time} - {end_time}\n"
+        f"Employee ID   : {employee_id}\n"
+        f"Notes         : {booking_notes or 'None'}\n"
+        f"Appointment ID: {appt_id}\n\n"
+        f"Save your Appointment ID — you will need it to reschedule or cancel."
+    )
+
+
+@tool
+def get_my_appointments(status: str = "all") -> str:
+    """
+    Get all appointments for the currently logged-in user or employee.
+    The token automatically determines whose appointments are shown.
+    Input:
+      status — 'all', 'upcoming', 'completed', 'cancelled' (default: 'all')
+    """
+    result = api_get(
+        "/api/v1/appointment/",
+        params={"status": status}
     )
 
     if "error" in result:
         return f"Could not fetch appointments: {result['error']}"
 
-    schedules = (
+    appointments = (
         result.get("data")
-        or result.get("schedules")
+        or result.get("appointments")
         or []
     )
 
-    if not schedules:
-        return f"No appointments found on {date}."
+    if isinstance(appointments, dict):
+        appointments = appointments.get("data") or appointments.get("appointments") or []
+
+    if not appointments:
+        return f"No appointments found with status '{status}'."
 
     lines = []
-    for s in schedules:
-        for slot in s.get("slots", []):
-            lines.append(
-                f"  {slot.get('startTime','?')} - {slot.get('endTime','?')} "
-                f"| {slot.get('summary','Appointment')} "
-                f"| Status: {slot.get('status','?')} "
-                f"| Slot ID: {slot.get('_id','?')}"
-            )
+    for a in appointments:
+        lines.append(
+            f"- ID: {a.get('_id','N/A')}\n"
+            f"  Date    : {a.get('appointmentDate', a.get('date','N/A'))}\n"
+            f"  Time    : {a.get('startTime','N/A')} - {a.get('endTime','N/A')}\n"
+            f"  Status  : {a.get('status','N/A').upper()}\n"
+            f"  Notes   : {a.get('bookingNotes', a.get('notes','None'))}"
+        )
 
     return (
-        f"Appointments on {date} (status={status}):\n"
-        + "\n".join(lines)
+        f"Your appointments (status={status}) — {len(lines)} found:\n\n"
+        + "\n\n".join(lines)
     )
 
 
 @tool
-def book_appointment(
-    date: str,
-    start_time: str,
-    end_time: str,
-    client_id: str,
-    summary: str = "",
-) -> str:
+def get_single_appointment(appointment_id: str) -> str:
     """
-    Book a new appointment slot.
-    Inputs:
-      date       — YYYY-MM-DD e.g. '2026-04-15'
-      start_time — e.g. '10:00 AM'
-      end_time   — e.g. '11:30 AM'
-      client_id  — the MongoDB _id of the client/customer
-      summary    — optional note e.g. 'Haircut for Ahmed'
+    Get full details of one specific appointment.
+    Input: appointment_id — the MongoDB _id of the appointment.
+    Works for both employee and client tokens.
     """
-    body = {
-        "date": date,
-        "slots": [
-            {
-                "startTime": start_time,
-                "endTime":   end_time,
-                "client":    client_id,
-                "summary":   summary,
-            }
-        ],
-    }
-
-    result = api_post("/api/v1/schedule/", body)
+    result = api_get(f"/api/v1/appointment/{appointment_id}")
 
     if "error" in result:
-        return f"Booking failed: {result['error']}"
+        return f"Could not fetch appointment: {result['error']}"
 
-    data = result.get("data", result)
+    a = result.get("data", result)
+
+    if isinstance(a, list):
+        a = a[0] if a else {}
+
+    employee = a.get("employee", {})
+    emp_name = (
+        employee.get("name", "N/A")
+        if isinstance(employee, dict)
+        else str(employee)
+    )
+
+    client = a.get("client", a.get("user", {}))
+    client_name = (
+        client.get("name", "N/A")
+        if isinstance(client, dict)
+        else str(client)
+    )
+
     return (
-        f"Appointment booked successfully!\n"
-        f"Date      : {date}\n"
-        f"Time      : {start_time} - {end_time}\n"
-        f"Summary   : {summary or 'N/A'}\n"
-        f"Schedule ID: {data.get('_id','N/A')}"
+        f"Appointment Details:\n"
+        f"ID       : {a.get('_id','N/A')}\n"
+        f"Date     : {a.get('appointmentDate', a.get('date','N/A'))}\n"
+        f"Time     : {a.get('startTime','N/A')} - {a.get('endTime','N/A')}\n"
+        f"Status   : {a.get('status','N/A').upper()}\n"
+        f"Employee : {emp_name}\n"
+        f"Client   : {client_name}\n"
+        f"Notes    : {a.get('bookingNotes', a.get('notes','None'))}"
     )
 
 
 @tool
 def reschedule_appointment(
-    schedule_id: str,
-    new_date: str = "",
-    slot_id: str = "",
-    new_start_time: str = "",
-    new_end_time: str = "",
+    appointment_id: str,
+    new_date: str,
+    new_start_time: str,
+    new_end_time: str,
 ) -> str:
     """
-    Reschedule an existing appointment.
+    Reschedule an existing appointment to a new date and time.
+    Only the user/client who booked can reschedule.
     Inputs:
-      schedule_id    — ID of the schedule (required)
-      new_date       — new date YYYY-MM-DD (optional)
-      slot_id        — the specific slot _id to change (optional)
-      new_start_time — new start time e.g. '02:00 PM' (optional)
-      new_end_time   — new end time e.g. '03:00 PM' (optional)
+      appointment_id — the _id of the appointment to change
+      new_date       — new date YYYY-MM-DD e.g. '2026-04-22'
+      new_start_time — new start time e.g. '12:00 PM'
+      new_end_time   — new end time e.g. '1:00 PM'
     """
-    body: dict = {}
-    if new_date:       body["date"]      = new_date
-    if slot_id:        body["slotId"]    = slot_id
-    if new_start_time: body["startTime"] = new_start_time
-    if new_end_time:   body["endTime"]   = new_end_time
+    body = {
+        "appointmentDate": new_date,
+        "startTime":       new_start_time,
+        "endTime":         new_end_time,
+    }
 
-    if not body:
-        return "Please provide at least a new date or new time to reschedule."
-
-    result = api_patch(f"/api/v1/schedule/{schedule_id}", body)
+    result = api_patch(f"/api/v1/appointment/{appointment_id}", body)
 
     if "error" in result:
-        return f"Reschedule failed: {result['error']}"
+        return (
+            f"Reschedule failed.\n"
+            f"Error: {result['error']}\n"
+            f"Check that the appointment ID is correct and the new slot is available."
+        )
 
     return (
-        f"Appointment rescheduled successfully.\n"
-        f"Schedule ID  : {schedule_id}\n"
-        f"Changes made : {', '.join(body.keys())}"
+        f"Appointment rescheduled successfully!\n"
+        f"Appointment ID : {appointment_id}\n"
+        f"New Date       : {new_date}\n"
+        f"New Time       : {new_start_time} - {new_end_time}"
     )
 
 
 @tool
-def cancel_appointment(schedule_id: str, slot_id: str) -> str:
+def cancel_appointment(appointment_id: str) -> str:
     """
-    Cancel a specific appointment slot.
-    Inputs:
-      schedule_id — the schedule document _id
-      slot_id     — the slot _id inside that schedule
+    Cancel an appointment. Only the user/client who booked can cancel.
+    Input: appointment_id — the MongoDB _id of the appointment.
+    Always confirm with the user before calling this.
     """
-    body = {
-        "scheduleId": schedule_id,
-        "slotId":     slot_id,
-        "action":     "cancel",
-    }
-    result = api_patch("/api/v1/schedule/session-action", body)
+    body = {"status": "cancelled"}
+
+    result = api_patch(f"/api/v1/appointment/{appointment_id}", body)
 
     if "error" in result:
-        return f"Cancellation failed: {result['error']}"
+        return (
+            f"Cancellation failed.\n"
+            f"Error: {result['error']}\n"
+            f"Check that the appointment ID is correct."
+        )
 
     return (
-        f"Appointment cancelled.\n"
-        f"Schedule : {schedule_id}\n"
-        f"Slot     : {slot_id}"
+        f"Appointment cancelled successfully.\n"
+        f"Appointment ID: {appointment_id}\n"
+        f"Status is now: CANCELLED"
+    )
+
+
+@tool
+def update_appointment_status_employee(
+    appointment_id: str,
+    status: str,
+) -> str:
+    """
+    Update appointment status as an employee.
+    Use this to mark appointments as started, in progress, or completed.
+    Inputs:
+      appointment_id — the _id of the appointment
+      status         — one of: 'started', 'in_progress', 'completed'
+    """
+    allowed = ["started", "in_progress", "completed"]
+    if status not in allowed:
+        return (
+            f"Invalid status '{status}'. "
+            f"Allowed values: {', '.join(allowed)}"
+        )
+
+    body = {"status": status}
+    result = api_patch(f"/api/v1/appointment/{appointment_id}", body)
+
+    if "error" in result:
+        return f"Status update failed: {result['error']}"
+
+    return (
+        f"Appointment {appointment_id} status updated to: {status.upper()}"
     )
