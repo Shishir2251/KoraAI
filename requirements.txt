@@ -1,21 +1,8 @@
-fastapi==0.111.0
-uvicorn[standard]==0.29.0
-pydantic==2.7.1
-pydantic-settings==2.2.1
-python-jose[cryptography]==3.3.0
-python-multipart==0.0.9
-python-dotenv==1.0.1
-
-# OpenAI + LangChain
-openai==1.30.0
-langchain==0.2.1
-langchain-openai==0.1.8
-langchain-core==0.2.3
-
-# HTTP client for calling backend API
-httpx==0.27.0
-
-# Testing
-pytest==8.2.0
-pytest-asyncio==0.23.6
-respx==0.21.1
+langchain
+langchain-openai
+langchain-community
+python-dotenv
+fastapi
+uvicorn
+requests
+pydantic
