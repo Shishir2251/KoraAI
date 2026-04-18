@@ -1,5 +1,13 @@
 from langchain.tools import tool
 from api_client import api_get, api_post
+import requests
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+BASE_URL       = os.getenv("BASE_URL")
+EMPLOYEE_TOKEN = os.getenv("EMPLOYEE_TOKEN", "")
 
 
 @tool
@@ -7,43 +15,56 @@ def apply_for_leave(
     start_date: str,
     end_date: str,
     leave_type: str,
-    reason: str,
+    reason: str = "No reason provided",
 ) -> str:
     """
     Submit a leave application for the logged-in employee.
     Inputs:
-      start_date  — YYYY-MM-DD
-      end_date    — YYYY-MM-DD
-      leave_type  — e.g. 'sick', 'annual', 'casual'
-      reason      — short description of the reason
+      start_date  — YYYY-MM-DD e.g. '2026-05-01'
+      end_date    — YYYY-MM-DD e.g. '2026-05-03'
+      leave_type  — 'Sick Leave', 'Casual Leave', or 'Leave Without Pay'
+      reason      — optional short description (default: No reason provided)
+
+    Use multipart/form-data because backend expects formdata not JSON.
     """
-    body = {
-        "startDate":  start_date,
-        "endDate":    end_date,
-        "leaveType":  leave_type,
-        "reason":     reason,
-    }
-    result = api_post("/api/v1/work/leave", body)
+    try:
+        res = requests.post(
+            f"{BASE_URL}/api/v1/work/leave",
+            headers={"Authorization": f"Bearer {EMPLOYEE_TOKEN}"},
+            data={
+                "startDate": start_date,
+                "endDate":   end_date,
+                "leaveType": leave_type,
+                "reason":    reason,
+            },
+            timeout=30,
+        )
+        data = res.json()
 
-    if "error" in result:
-        return f"Failed to submit leave: {result['error']}"
+        if not res.ok:
+            return (
+                f"Failed to submit leave.\n"
+                f"Error: {data.get('message', 'Unknown error')}"
+            )
 
-    data = result.get("data", result)
-    return (
-        f"Leave application submitted.\n"
-        f"Dates  : {start_date} to {end_date}\n"
-        f"Type   : {leave_type}\n"
-        f"Reason : {reason}\n"
-        f"ID     : {data.get('_id','N/A')}\n"
-        f"Status : PENDING"
-    )
+        result = data.get("data", {})
+        return (
+            f"Leave application submitted!\n"
+            f"Dates     : {start_date} to {end_date}\n"
+            f"Type      : {leave_type}\n"
+            f"Reason    : {reason}\n"
+            f"Status    : PENDING\n"
+            f"ID        : {result.get('_id', 'N/A')}"
+        )
+    except Exception as e:
+        return f"Could not submit leave: {str(e)}"
 
 
 @tool
 def check_leave_status(leave_id: str = "") -> str:
     """
     Check leave application status.
-    Input: leave_id (optional). If blank, returns all leave applications.
+    Input: leave_id — optional. If blank returns all applications.
     """
     if leave_id:
         result = api_get(f"/api/v1/work/leave/{leave_id}")

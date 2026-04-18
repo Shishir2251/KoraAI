@@ -281,3 +281,41 @@ def update_appointment_status_employee(
         return f"Status update failed: {result['error']}"
 
     return f"Appointment {appointment_id} is now marked as: {status.upper()}"
+@tool
+def get_my_appointments_by_date(date: str) -> str:
+    """
+    Get all appointments for a specific date (not just today).
+    Use this when the user asks about appointments on a particular date.
+    Input: date — YYYY-MM-DD e.g. '2026-04-19'
+    """
+    result = api_get("/api/v1/appointment/", params={"status": "all"})
+
+    if "error" in result:
+        return f"Could not fetch appointments: {result['error']}"
+
+    all_appts = result.get("data") or result.get("appointments") or []
+    if isinstance(all_appts, dict):
+        all_appts = all_appts.get("data") or all_appts.get("appointments") or []
+
+    # Filter by requested date
+    filtered = [
+        a for a in all_appts
+        if _format_date(a.get("appointmentDate", a.get("date", ""))) == date
+    ]
+
+    if not filtered:
+        return f"No appointments found on {date}."
+
+    lines = []
+    for a in filtered:
+        lines.append(
+            f"  - {a.get('startTime','N/A')} to {a.get('endTime','N/A')} "
+            f"| Status: {a.get('status','N/A').upper()} "
+            f"| Notes: {a.get('bookingNotes', a.get('notes','None'))} "
+            f"| ID: {a.get('_id','N/A')}"
+        )
+
+    return (
+        f"Appointments on {date} ({len(lines)} found):\n"
+        + "\n".join(lines)
+    )
