@@ -1,22 +1,35 @@
 import os
+import time
 import requests
 from dotenv import load_dotenv
 
 load_dotenv()
 
-BASE_URL     = os.getenv("BASE_URL", "http://localhost:5000")
-ACCESS_TOKEN = os.getenv("ACCESS_TOKEN", "")
+BASE_URL       = os.getenv("BASE_URL", "http://localhost:5000")
+USER_TOKEN     = os.getenv("USER_TOKEN", "")
+EMPLOYEE_TOKEN = os.getenv("EMPLOYEE_TOKEN", "")
+
+# Which token is active for this session
+# Switch by calling set_role("user") or set_role("employee")
+_active_role = "user"
+
+
+def set_role(role: str):
+    """Switch the active token between 'user' and 'employee'."""
+    global _active_role
+    _active_role = role
+    print(f"[TOKEN] Switched to role: {role}")
 
 
 def get_headers():
+    token = EMPLOYEE_TOKEN if _active_role == "employee" else USER_TOKEN
     return {
-        "Authorization": f"Bearer {ACCESS_TOKEN}",
+        "Authorization": f"Bearer {token}",
         "Content-Type":  "application/json",
     }
 
 
 def _handle_response(res, path):
-    """Parse response and print debug info on failure."""
     try:
         data = res.json()
     except Exception:
@@ -31,70 +44,53 @@ def _handle_response(res, path):
     return data
 
 
+def _request_with_retry(method, path, params=None, body=None, timeout=30, retries=2):
+    """Make an HTTP request with automatic retry on timeout."""
+    url = f"{BASE_URL}{path}"
+    for attempt in range(retries + 1):
+        try:
+            if method == "GET":
+                res = requests.get(url, headers=get_headers(), params=params, timeout=timeout)
+            elif method == "POST":
+                res = requests.post(url, headers=get_headers(), json=body, timeout=timeout)
+            elif method == "PUT":
+                res = requests.put(url, headers=get_headers(), json=body, timeout=timeout)
+            elif method == "PATCH":
+                res = requests.patch(url, headers=get_headers(), json=body, timeout=timeout)
+            elif method == "DELETE":
+                res = requests.delete(url, headers=get_headers(), timeout=timeout)
+            else:
+                return {"error": f"Unknown method {method}"}
+            return _handle_response(res, path)
+
+        except requests.exceptions.Timeout:
+            if attempt < retries:
+                print(f"\n[TIMEOUT] {method} {path} — retrying ({attempt + 1}/{retries})...")
+                time.sleep(3)
+            else:
+                print(f"\n[TIMEOUT] {method} {path} — all retries exhausted")
+                return {"error": f"Request timed out after {retries + 1} attempts. Backend may be slow — try again."}
+
+        except requests.exceptions.RequestException as e:
+            print(f"\n[API EXCEPTION] {method} {path} — {e}\n")
+            return {"error": str(e)}
+
+
 def api_get(path: str, params: dict = None) -> dict:
-    try:
-        res = requests.get(
-            f"{BASE_URL}{path}",
-            headers=get_headers(),
-            params=params,
-            timeout=10,
-        )
-        return _handle_response(res, path)
-    except requests.exceptions.RequestException as e:
-        print(f"\n[API EXCEPTION] GET {path} — {e}\n")
-        return {"error": str(e)}
+    return _request_with_retry("GET", path, params=params)
 
 
 def api_post(path: str, body: dict) -> dict:
-    try:
-        res = requests.post(
-            f"{BASE_URL}{path}",
-            headers=get_headers(),
-            json=body,
-            timeout=10,
-        )
-        return _handle_response(res, path)
-    except requests.exceptions.RequestException as e:
-        print(f"\n[API EXCEPTION] POST {path} — {e}\n")
-        return {"error": str(e)}
+    return _request_with_retry("POST", path, body=body)
 
 
 def api_put(path: str, body: dict) -> dict:
-    try:
-        res = requests.put(
-            f"{BASE_URL}{path}",
-            headers=get_headers(),
-            json=body,
-            timeout=10,
-        )
-        return _handle_response(res, path)
-    except requests.exceptions.RequestException as e:
-        print(f"\n[API EXCEPTION] PUT {path} — {e}\n")
-        return {"error": str(e)}
+    return _request_with_retry("PUT", path, body=body)
 
 
 def api_patch(path: str, body: dict) -> dict:
-    try:
-        res = requests.patch(
-            f"{BASE_URL}{path}",
-            headers=get_headers(),
-            json=body,
-            timeout=10,
-        )
-        return _handle_response(res, path)
-    except requests.exceptions.RequestException as e:
-        print(f"\n[API EXCEPTION] PATCH {path} — {e}\n")
-        return {"error": str(e)}
+    return _request_with_retry("PATCH", path, body=body)
 
 
 def api_delete(path: str) -> dict:
-    try:
-        res = requests.delete(
-            f"{BASE_URL}{path}",
-            headers=get_headers(),
-            timeout=10,
-        )
-        return _handle_response(res, path)
-    except requests.exceptions.RequestException as e:
-        print(f"\n[API EXCEPTION] DELETE {path} — {e}\n")
-        return {"error": str(e)}
+    return _request_with_retry("DELETE", path)
