@@ -1,13 +1,11 @@
 import sys
 import uvicorn
-from fastapi import FastAPI, Header
+import asyncio
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
 from datetime import date, timedelta
 import api_client
-
-# Import agent builder — not the singleton
 from agent import build_kora
 
 app = FastAPI(title="KoraAI Agent API")
@@ -19,25 +17,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory session store — key: session_id, value: kora AgentExecutor
-sessions: dict = {}
+sessions: dict     = {}
+session_locks: dict = {}
 
 
-def get_or_create_session(session_id: str, role: str):
-    """
-    Return existing session for this session_id or create a new one.
-    Each session has its own memory so conversation history is preserved.
-    """
+def get_or_create_session(session_id: str):
     if session_id not in sessions:
-        sessions[session_id] = build_kora()
-    api_client.set_role(role)
-    return sessions[session_id]
+        sessions[session_id]       = build_kora()
+        session_locks[session_id]  = asyncio.Lock()
+    return sessions[session_id], session_locks[session_id]
 
 
 class MessageRequest(BaseModel):
     message:    str
-    role:       str = "user"       # "user" or "employee"
-    session_id: str = "default"    # caller provides this to maintain conversation
+    role:       str = "user"
+    session_id: str = "default"
 
 
 class MessageResponse(BaseModel):
@@ -47,8 +41,19 @@ class MessageResponse(BaseModel):
 
 @app.post("/chat", response_model=MessageResponse)
 async def chat(req: MessageRequest):
-    kora = get_or_create_session(req.session_id, req.role)
-    result = kora.invoke({"input": req.message})
+    kora, lock = get_or_create_session(req.session_id)
+
+    # Prepend role clearly so GPT-4o always knows who is speaking
+    role_label = "EMPLOYEE" if req.role == "employee" else "USER"
+    full_input = f"[ROLE: {role_label}]\n{req.message}"
+
+    async with lock:
+        api_client.set_role(req.role)
+        result = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: kora.invoke({"input": full_input})
+        )
+
     return MessageResponse(
         reply=result["output"],
         session_id=req.session_id
@@ -57,9 +62,9 @@ async def chat(req: MessageRequest):
 
 @app.delete("/session/{session_id}")
 def clear_session(session_id: str):
-    """Clear a session's memory — use this when user logs out."""
     if session_id in sessions:
         del sessions[session_id]
+        del session_locks[session_id]
         return {"cleared": session_id}
     return {"message": "Session not found"}
 
@@ -78,12 +83,8 @@ def health():
 
 def run_terminal():
     print("\nKora is ready.")
-    print("Commands:")
-    print("  'role user'     — switch to user (client) mode")
-    print("  'role employee' — switch to employee mode")
-    print("  'quit'          — exit\n")
+    print("Commands: 'role user', 'role employee', 'quit'\n")
 
-    # Terminal uses one persistent session
     kora = build_kora()
     api_client.set_role("user")
 
@@ -115,6 +116,6 @@ def run_terminal():
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "server":
         print("Starting Kora API server on http://localhost:8000")
-        uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+        uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
     else:
         run_terminal()

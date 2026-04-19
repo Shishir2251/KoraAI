@@ -1,6 +1,7 @@
 from langchain.tools import tool
 from api_client import api_get, api_post, api_patch
 from datetime import datetime
+import api_client
 
 
 def _format_date(raw: str) -> str:
@@ -274,71 +275,28 @@ def get_single_appointment(appointment_id: str) -> str:
 
 
 @tool
-def reschedule_appointment(
-    appointment_id: str,
-    new_date: str,
-    new_start_time: str,
-    new_end_time: str,
-) -> str:
-    """
-    Reschedule an appointment to a new date and time.
-    Only the user/client who booked can reschedule.
-    Inputs:
-      appointment_id — _id of the appointment
-      new_date       — YYYY-MM-DD e.g. '2026-04-27'
-      new_start_time — e.g. '11:00 AM' or '11:00'
-      new_end_time   — e.g. '12:00 PM' or '12:00'
-    """
-    # Pre-check: do not reschedule cancelled or completed appointments
-    check = api_get(f"/api/v1/appointment/{appointment_id}")
-    if "error" not in check:
-        appt   = check.get("data", {})
-        if isinstance(appt, list):
-            appt = appt[0] if appt else {}
-        status = appt.get("status", "").lower()
-        if status in ["cancelled", "completed"]:
-            return (
-                f"Cannot reschedule — appointment is already {status.upper()}.\n"
-                f"Only upcoming appointments can be rescheduled."
-            )
-
-    body = {
-        "appointmentDate": new_date,
-        "startTime":       new_start_time,
-        "endTime":         new_end_time,
-    }
-
-    result = api_patch(f"/api/v1/appointment/{appointment_id}", body)
-
-    if "error" in result:
-        err = str(result["error"])
-        if "timed out" in err.lower():
-            return "Request timed out. Please try again in a moment."
-        return f"Reschedule failed: {result['error']}"
-
-    return (
-        f"Appointment rescheduled!\n"
-        f"Appointment ID : {appointment_id}\n"
-        f"New Date       : {new_date}\n"
-        f"New Time       : {new_start_time} - {new_end_time}"
-    )
-
-
-@tool
 def cancel_appointment(appointment_id: str) -> str:
     """
-    Cancel an appointment. Only the user/client who booked can cancel.
-    Cannot cancel completed or already cancelled appointments.
+    Cancel an appointment. Only a USER (client) can cancel.
+    Employees cannot cancel appointments.
     Input: appointment_id — MongoDB _id. Always confirm with user first.
     """
-    # Pre-check status before attempting cancel
+    # Hard block — employee cannot cancel
+    if api_client._active_role == "employee":
+        return (
+            "As an employee you can only view appointments. "
+            "You cannot cancel appointments. "
+            "Please ask the client to cancel their own booking."
+        )
+
+    # Pre-check status
     check = api_get(f"/api/v1/appointment/{appointment_id}")
     if "error" not in check:
         appt   = check.get("data", {})
         if isinstance(appt, list):
             appt = appt[0] if appt else {}
         status = appt.get("status", "").lower()
-        if status in ["cancelled"]:
+        if status == "cancelled":
             return "This appointment is already cancelled."
         if status in ["completed", "started", "in_progress"]:
             return (
@@ -363,4 +321,63 @@ def cancel_appointment(appointment_id: str) -> str:
         f"Appointment cancelled.\n"
         f"ID: {appointment_id}\n"
         f"Status: CANCELLED"
+    )
+
+
+@tool
+def reschedule_appointment(
+    appointment_id: str,
+    new_date: str,
+    new_start_time: str,
+    new_end_time: str,
+) -> str:
+    """
+    Reschedule an appointment. Only a USER (client) can reschedule.
+    Employees cannot reschedule appointments.
+    Inputs:
+      appointment_id — _id of the appointment
+      new_date       — YYYY-MM-DD
+      new_start_time — e.g. '11:00 AM'
+      new_end_time   — e.g. '12:00 PM'
+    """
+    # Hard block — employee cannot reschedule
+    if api_client._active_role == "employee":
+        return (
+            "As an employee you can only view appointments. "
+            "You cannot reschedule appointments. "
+            "Please ask the client to update their own booking."
+        )
+
+    # Pre-check: do not reschedule cancelled or completed
+    check = api_get(f"/api/v1/appointment/{appointment_id}")
+    if "error" not in check:
+        appt = check.get("data", {})
+        if isinstance(appt, list):
+            appt = appt[0] if appt else {}
+        status = appt.get("status", "").lower()
+        if status in ["cancelled", "completed"]:
+            return (
+                f"Cannot reschedule — appointment is already {status.upper()}.\n"
+                f"Only upcoming appointments can be rescheduled."
+            )
+
+    body = {
+        "appointmentDate": new_date,
+        "startTime":       new_start_time,
+        "endTime":         new_end_time,
+    }
+
+    result = api_patch(f"/api/v1/appointment/{appointment_id}", body)
+
+    if "error" in result:
+        err = str(result["error"])
+        if "timed out" in err.lower():
+            return "Request timed out. Please try again."
+        return f"Reschedule failed: {result['error']}"
+
+    return (
+        f"Appointment rescheduled!\n"
+        f"Appointment ID : {appointment_id}\n"
+        f"New Date       : {new_date}\n"
+        f"New Time       : {new_start_time} - {new_end_time}"
     )
