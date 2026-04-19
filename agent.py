@@ -1,8 +1,8 @@
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
-from langchain_classic.agents import create_openai_tools_agent, AgentExecutor
-from langchain_classic.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_classic.memory import ConversationBufferMemory
+from langchain.agents import create_openai_tools_agent, AgentExecutor
+from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain.memory import ConversationBufferMemory
 from tools import all_tools
 from datetime import date, timedelta
 
@@ -91,5 +91,5 @@ RULES FOR BOTH ROLES
     )
 
 
-# Terminal convenience
+# Terminal convenience — single instance
 kora = build_kora()
