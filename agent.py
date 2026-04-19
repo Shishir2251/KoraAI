@@ -8,19 +8,23 @@ from datetime import date, timedelta
 
 load_dotenv()
 
-llm = ChatOpenAI(model="gpt-4o", temperature=0)
 
-
-def build_prompt():
+def build_kora() -> AgentExecutor:
+    """
+    Build and return a fresh Kora agent with its own memory.
+    Call this once per session — not once per request.
+    """
     today    = date.today()
     tomorrow = today + timedelta(days=1)
 
-    return ChatPromptTemplate.from_messages([
+    llm = ChatOpenAI(model="gpt-4o", temperature=0)
+
+    prompt = ChatPromptTemplate.from_messages([
         ("system", f"""You are Kora, an AI assistant for KoraAI — an appointment management platform.
 
 TODAY IS: {today.strftime("%Y-%m-%d")} ({today.strftime("%A")})
 TOMORROW IS: {tomorrow.strftime("%Y-%m-%d")}
-Always use these dates when user says "today", "tomorrow", or "next week".
+Always use these exact dates when user says "today", "tomorrow", or "next week".
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 USER (client) — what they can do:
@@ -53,9 +57,9 @@ If employee asks to cancel, reschedule, or change anything:
 → Do NOT call any write tool.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STRICT RULES for both roles:
+STRICT RULES — both roles:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-- ALWAYS call a tool. Never answer from memory alone.
+- ALWAYS call the tool. Never answer from memory. Never guess.
 - Even if an ID looks wrong (like abc123), call the tool — backend decides.
 - If apply_for_leave is called without a reason, use "No reason provided".
 - Keep replies short and clear. Always show appointment IDs so users can copy them.
@@ -65,19 +69,21 @@ STRICT RULES for both roles:
         MessagesPlaceholder(variable_name="agent_scratchpad"),
     ])
 
+    memory = ConversationBufferMemory(
+        memory_key="chat_history",
+        return_messages=True
+    )
 
-memory = ConversationBufferMemory(
-    memory_key="chat_history",
-    return_messages=True
-)
+    agent = create_openai_tools_agent(llm, all_tools, prompt)
 
-prompt = build_prompt()
-agent  = create_openai_tools_agent(llm, all_tools, prompt)
+    return AgentExecutor(
+        agent=agent,
+        tools=all_tools,
+        memory=memory,
+        verbose=True,
+        handle_parsing_errors=True,
+    )
 
-kora = AgentExecutor(
-    agent=agent,
-    tools=all_tools,
-    memory=memory,
-    verbose=True,
-    handle_parsing_errors=True,
-)
+
+# Terminal convenience — single instance
+kora = build_kora()

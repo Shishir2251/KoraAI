@@ -4,10 +4,32 @@ from datetime import datetime
 
 
 def _format_date(raw: str) -> str:
-    """Convert 2026-04-19T18:00:00.000Z to 2026-04-19"""
-    if not raw:
-        return "N/A"
-    return raw[:10]
+    """Convert ISO date to YYYY-MM-DD."""
+    return raw[:10] if raw else "N/A"
+
+
+def _generate_hour_slots(start: str, end: str) -> list:
+    """
+    Convert a range like 09:00-18:00 into individual 1-hour slots.
+    Returns list of dicts: [{startTime, endTime}, ...]
+    """
+    slots = []
+    try:
+        current = datetime.strptime(start, "%H:%M")
+        end_dt  = datetime.strptime(end,   "%H:%M")
+        while current < end_dt:
+            next_slot = current.replace(minute=0, second=0)
+            next_slot = next_slot.replace(hour=current.hour + 1)
+            if next_slot > end_dt:
+                next_slot = end_dt
+            slots.append({
+                "startTime": current.strftime("%H:%M"),
+                "endTime":   next_slot.strftime("%H:%M"),
+            })
+            current = next_slot
+    except Exception:
+        pass
+    return slots
 
 
 @tool
@@ -17,7 +39,7 @@ def get_available_slots(employee_id: str, date: str) -> str:
     Always call this FIRST before booking an appointment.
     Inputs:
       employee_id — MongoDB _id of the employee
-      date        — YYYY-MM-DD e.g. '2026-04-20'
+      date        — YYYY-MM-DD e.g. '2026-04-25'
     """
     result = api_get(
         "/api/v1/appointment/available-slots",
@@ -27,32 +49,73 @@ def get_available_slots(employee_id: str, date: str) -> str:
     if "error" in result:
         return f"Could not fetch slots: {result['error']}"
 
-    data = result.get("data", result)
-    slots = []
+    data = result.get("data", {})
 
-    # Handle both shapes: list of dicts or nested under "slots"
-    if isinstance(data, dict):
-        slots = data.get("slots", data.get("availableSlots", []))
-    elif isinstance(data, list):
-        slots = data
+    if not data:
+        return f"No slot data returned for employee {employee_id} on {date}."
 
-    if not slots:
-        return f"No available slots for employee {employee_id} on {date}."
+    # Extract booked appointment times
+    booked = data.get("bookedAppointments", [])
+    booked_times = set()
+    for b in booked:
+        booked_times.add(b.get("startTime", ""))
 
-    available = [s for s in slots if s.get("isAvailable", True) and not s.get("isBooked", False)]
+    # Build available slots from availableRanges
+    available_ranges = data.get("availableRanges", [])
+    working_hours    = data.get("workingHours", {})
 
-    if not available:
-        return f"All slots are booked for employee {employee_id} on {date}."
+    all_slots = []
 
-    lines = [
-        f"  - {s.get('startTime','?')} to {s.get('endTime','?')}"
-        for s in available
+    if available_ranges:
+        # Generate 1-hour blocks from each free range
+        for r in available_ranges:
+            blocks = _generate_hour_slots(
+                r.get("startTime", "09:00"),
+                r.get("endTime",   "18:00")
+            )
+            all_slots.extend(blocks)
+
+    elif working_hours:
+        # Fallback: generate from working hours and exclude booked
+        all_slots = _generate_hour_slots(
+            working_hours.get("startTime", "09:00"),
+            working_hours.get("endTime",   "18:00")
+        )
+
+    # Remove any slots that are booked
+    free_slots = [
+        s for s in all_slots
+        if s["startTime"] not in booked_times
     ]
 
+    if not free_slots:
+        return (
+            f"No available slots for employee {employee_id} on {date}.\n"
+            f"All time slots are fully booked."
+        )
+
+    lines = [
+        f"  - {s['startTime']} to {s['endTime']}"
+        for s in free_slots
+    ]
+
+    booked_summary = ""
+    if booked:
+        booked_lines = [
+            f"  - {b.get('startTime','?')} to {b.get('endTime','?')}"
+            for b in booked
+        ]
+        booked_summary = (
+            f"\nAlready booked ({len(booked)}):\n"
+            + "\n".join(booked_lines)
+        )
+
     return (
-        f"Available slots for employee {employee_id} on {date}:\n"
+        f"Available slots for employee {employee_id} on {date} "
+        f"({len(free_slots)} free):\n"
         + "\n".join(lines)
-        + f"\n\nTo book say: 'Book appointment on {date} from [time] to [time]'"
+        + booked_summary
+        + f"\n\nTo book say: 'Book appointment on {date} from [startTime] to [endTime]'"
     )
 
 
@@ -66,12 +129,12 @@ def create_appointment(
 ) -> str:
     """
     Book a new appointment. Only a USER (client) can book.
-    Make sure get_available_slots was called first.
+    Always call get_available_slots first to confirm the slot is free.
     Inputs:
-      employee_id      — _id of the employee to book with
-      appointment_date — YYYY-MM-DD e.g. '2026-04-20'
-      start_time       — e.g. '10:00 AM'
-      end_time         — e.g. '11:00 AM'
+      employee_id      — _id of the employee e.g. '69e2e76c87b441f121dbe929'
+      appointment_date — YYYY-MM-DD e.g. '2026-04-25'
+      start_time       — e.g. '10:00 AM' or '10:00'
+      end_time         — e.g. '11:00 AM' or '11:00'
       booking_notes    — optional e.g. 'Haircut, short sides'
     """
     body = {
@@ -85,17 +148,15 @@ def create_appointment(
     result = api_post("/api/v1/appointment/", body)
 
     if "error" in result:
-        # Surface friendly message if role is wrong
         err_str = str(result["error"])
         if "Only user" in err_str or "403" in err_str:
             return (
-                "Booking failed: This action requires a USER account token.\n"
-                "Your current token may be an employee or owner account.\n"
-                "Please make sure USER_TOKEN in your .env is from a 'user' role account."
+                "Booking failed: your current token is not a user role account.\n"
+                "Make sure USER_TOKEN in .env is from an account registered with role 'user'."
             )
         return f"Booking failed: {result['error']}"
 
-    data   = result.get("data", result)
+    data    = result.get("data", result)
     appt_id = data.get("_id", "N/A") if isinstance(data, dict) else "N/A"
 
     return (
@@ -121,7 +182,7 @@ def get_my_appointments(status: str = "all") -> str:
     if "error" in result:
         return f"Could not fetch appointments: {result['error']}"
 
-    appointments = result.get("data") or result.get("appointments") or []
+    appointments = result.get("data") or []
     if isinstance(appointments, dict):
         appointments = appointments.get("data") or appointments.get("appointments") or []
 
@@ -142,6 +203,44 @@ def get_my_appointments(status: str = "all") -> str:
 
 
 @tool
+def get_my_appointments_by_date(date: str) -> str:
+    """
+    Get all appointments for a specific date.
+    Input: date — YYYY-MM-DD e.g. '2026-04-25'
+    """
+    result = api_get("/api/v1/appointment/", params={"status": "all"})
+
+    if "error" in result:
+        return f"Could not fetch appointments: {result['error']}"
+
+    all_appts = result.get("data") or []
+    if isinstance(all_appts, dict):
+        all_appts = all_appts.get("data") or all_appts.get("appointments") or []
+
+    filtered = [
+        a for a in all_appts
+        if _format_date(a.get("appointmentDate", a.get("date", ""))) == date
+    ]
+
+    if not filtered:
+        return f"No appointments found on {date}."
+
+    lines = []
+    for a in filtered:
+        lines.append(
+            f"  - {a.get('startTime','N/A')} to {a.get('endTime','N/A')}"
+            f" | Status: {a.get('status','N/A').upper()}"
+            f" | Notes: {a.get('bookingNotes', a.get('notes','None'))}"
+            f" | ID: {a.get('_id','N/A')}"
+        )
+
+    return (
+        f"Appointments on {date} ({len(lines)} found):\n"
+        + "\n".join(lines)
+    )
+
+
+@tool
 def get_single_appointment(appointment_id: str) -> str:
     """
     Get full details of one appointment by ID.
@@ -157,10 +256,9 @@ def get_single_appointment(appointment_id: str) -> str:
     if isinstance(a, list):
         a = a[0] if a else {}
 
-    employee = a.get("employee", {})
-    emp_name = employee.get("name", str(employee)) if isinstance(employee, dict) else str(employee)
-
-    client = a.get("client", a.get("user", {}))
+    employee    = a.get("employee", {})
+    emp_name    = employee.get("name", str(employee)) if isinstance(employee, dict) else str(employee)
+    client      = a.get("client", a.get("user", {}))
     client_name = client.get("name", str(client)) if isinstance(client, dict) else str(client)
 
     return (
@@ -187,10 +285,23 @@ def reschedule_appointment(
     Only the user/client who booked can reschedule.
     Inputs:
       appointment_id — _id of the appointment
-      new_date       — YYYY-MM-DD e.g. '2026-04-22'
-      new_start_time — e.g. '12:00 PM'
-      new_end_time   — e.g. '1:00 PM'
+      new_date       — YYYY-MM-DD e.g. '2026-04-27'
+      new_start_time — e.g. '11:00 AM' or '11:00'
+      new_end_time   — e.g. '12:00 PM' or '12:00'
     """
+    # Pre-check: do not reschedule cancelled or completed appointments
+    check = api_get(f"/api/v1/appointment/{appointment_id}")
+    if "error" not in check:
+        appt   = check.get("data", {})
+        if isinstance(appt, list):
+            appt = appt[0] if appt else {}
+        status = appt.get("status", "").lower()
+        if status in ["cancelled", "completed"]:
+            return (
+                f"Cannot reschedule — appointment is already {status.upper()}.\n"
+                f"Only upcoming appointments can be rescheduled."
+            )
+
     body = {
         "appointmentDate": new_date,
         "startTime":       new_start_time,
@@ -200,12 +311,9 @@ def reschedule_appointment(
     result = api_patch(f"/api/v1/appointment/{appointment_id}", body)
 
     if "error" in result:
-        err_str = str(result["error"])
-        if "timeout" in err_str.lower() or "timed out" in err_str.lower():
-            return (
-                "Request timed out — the server may be slow (Render free tier).\n"
-                "Please try again in 30 seconds."
-            )
+        err = str(result["error"])
+        if "timed out" in err.lower():
+            return "Request timed out. Please try again in a moment."
         return f"Reschedule failed: {result['error']}"
 
     return (
@@ -220,102 +328,39 @@ def reschedule_appointment(
 def cancel_appointment(appointment_id: str) -> str:
     """
     Cancel an appointment. Only the user/client who booked can cancel.
-    Cannot cancel an appointment that is already completed or started.
-    Input: appointment_id — MongoDB _id. Always confirm with user before calling.
+    Cannot cancel completed or already cancelled appointments.
+    Input: appointment_id — MongoDB _id. Always confirm with user first.
     """
     # Pre-check status before attempting cancel
     check = api_get(f"/api/v1/appointment/{appointment_id}")
     if "error" not in check:
-        appt = check.get("data", check)
+        appt   = check.get("data", {})
         if isinstance(appt, list):
             appt = appt[0] if appt else {}
-        current_status = appt.get("status", "").lower()
-        if current_status in ["completed", "started", "in_progress"]:
+        status = appt.get("status", "").lower()
+        if status in ["cancelled"]:
+            return "This appointment is already cancelled."
+        if status in ["completed", "started", "in_progress"]:
             return (
-                f"Cannot cancel this appointment.\n"
-                f"Current status is: {current_status.upper()}\n"
+                f"Cannot cancel — appointment is {status.upper()}.\n"
                 f"Only upcoming appointments can be cancelled."
             )
 
-    result = api_patch(f"/api/v1/appointment/{appointment_id}", {"status": "cancelled"})
+    result = api_patch(
+        f"/api/v1/appointment/{appointment_id}",
+        {"status": "cancelled"}
+    )
 
     if "error" in result:
-        err_str = str(result["error"])
-        if "completed" in err_str.lower():
+        err = str(result["error"])
+        if "timed out" in err.lower():
+            return "Request timed out. Please try again."
+        if "completed" in err.lower():
             return "Cannot cancel — this appointment is already completed."
-        if "timeout" in err_str.lower():
-            return "Request timed out. Please try again in 30 seconds."
         return f"Cancellation failed: {result['error']}"
 
     return (
         f"Appointment cancelled.\n"
         f"ID: {appointment_id}\n"
         f"Status: CANCELLED"
-    )
-
-
-@tool
-def update_appointment_status_employee(
-    appointment_id: str,
-    status: str,
-) -> str:
-    """
-    Update appointment status as an employee.
-    Use this to mark progress on an appointment.
-    Inputs:
-      appointment_id — _id of the appointment
-      status         — one of: 'started', 'in_progress', 'completed'
-    """
-    allowed = ["started", "in_progress", "completed"]
-    if status.lower() not in allowed:
-        return f"Invalid status '{status}'. Allowed: {', '.join(allowed)}"
-
-    result = api_patch(
-        f"/api/v1/appointment/{appointment_id}",
-        {"status": status.lower()}
-    )
-
-    if "error" in result:
-        if "timeout" in str(result["error"]).lower():
-            return "Request timed out. Please try again."
-        return f"Status update failed: {result['error']}"
-
-    return f"Appointment {appointment_id} is now marked as: {status.upper()}"
-@tool
-def get_my_appointments_by_date(date: str) -> str:
-    """
-    Get all appointments for a specific date (not just today).
-    Use this when the user asks about appointments on a particular date.
-    Input: date — YYYY-MM-DD e.g. '2026-04-19'
-    """
-    result = api_get("/api/v1/appointment/", params={"status": "all"})
-
-    if "error" in result:
-        return f"Could not fetch appointments: {result['error']}"
-
-    all_appts = result.get("data") or result.get("appointments") or []
-    if isinstance(all_appts, dict):
-        all_appts = all_appts.get("data") or all_appts.get("appointments") or []
-
-    # Filter by requested date
-    filtered = [
-        a for a in all_appts
-        if _format_date(a.get("appointmentDate", a.get("date", ""))) == date
-    ]
-
-    if not filtered:
-        return f"No appointments found on {date}."
-
-    lines = []
-    for a in filtered:
-        lines.append(
-            f"  - {a.get('startTime','N/A')} to {a.get('endTime','N/A')} "
-            f"| Status: {a.get('status','N/A').upper()} "
-            f"| Notes: {a.get('bookingNotes', a.get('notes','None'))} "
-            f"| ID: {a.get('_id','N/A')}"
-        )
-
-    return (
-        f"Appointments on {date} ({len(lines)} found):\n"
-        + "\n".join(lines)
     )
