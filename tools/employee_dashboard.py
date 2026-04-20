@@ -69,31 +69,31 @@ def get_my_appointment_calendar(month: str, year: str) -> str:
 
     if not data:
         return (
-            f"No appointments found in your calendar for {month}/{year}.\n"
-            f"This means no appointments have been assigned to your account yet."
+            f"No appointments found in your calendar for "
+            f"{month}/{year}."
         )
 
+    from collections import defaultdict
+    grouped = defaultdict(list)
+    for item in data:
+        full_date = item.get("fullDate", "N/A")
+        status    = item.get("status", "unknown")
+        grouped[full_date].append(status)
+
     lines = []
-    if isinstance(data, list):
-        for day in data:
-            day_date = day.get("date", "N/A")
-            appts    = day.get("appointments", day.get("slots", []))
-            count    = len(appts) if appts else day.get("count", 0)
-            if count > 0:
-                lines.append(f"  {day_date}: {count} appointment(s)")
-    elif isinstance(data, dict):
-        appts = data.get("appointments", data.get("data", []))
-        for a in appts:
-            lines.append(
-                f"  {_fmt(a.get('appointmentDate',''))} "
-                f"| {a.get('startTime','?')} - {a.get('endTime','?')} "
-                f"| {a.get('status','?').upper()}"
-            )
+    for full_date in sorted(grouped.keys()):
+        statuses = grouped[full_date]
+        count    = len(statuses)
+        summary  = ", ".join(statuses)
+        lines.append(
+            f"  {full_date} — {count} appointment(s) — {summary}"
+        )
 
-    if not lines:
-        return f"No appointments with bookings in {month}/{year}."
-
-    return f"Your calendar for {month}/{year}:\n" + "\n".join(lines)
+    return (
+        f"Your calendar for {month}/{year} "
+        f"({len(grouped)} day(s) with appointments):\n"
+        + "\n".join(lines)
+    )
 
 
 @tool
