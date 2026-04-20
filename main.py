@@ -113,9 +113,9 @@ def run_terminal():
         print(f"\nKora: {response['output']}\n")
 
 
-if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "server":
-        print("Starting Kora API server on http://localhost:8000")
-        uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
-    else:
-        run_terminal()
+# if __name__ == "__main__":
+#     if len(sys.argv) > 1 and sys.argv[1] == "server":
+#         print("Starting Kora API server on http://localhost:8000")
+#         uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
+#     else:
+#         run_terminal()
