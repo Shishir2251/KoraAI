@@ -108,19 +108,19 @@ class MessageResponse(BaseModel):
     user_id:    str
 
 
-# ── Main chat endpoint — 3 fields only ────────────────────
+# ── Main chat endpoint — 2 fields only ────────────────────
 
 @app.post("/chat", response_model=MessageResponse)
 async def chat(
-    token:      str = Form(..., description="accessToken from your app login"),
-    message:    str = Form(..., description="Your message to Kora"),
-    session_id: str = Form("default", description="Conversation ID — keep same to maintain memory"),
+    token:   str = Form(..., description="accessToken from your app login"),
+    message: str = Form(..., description="Your message to Kora"),
 ):
     """
-    3 fields:
-    - token      → your accessToken
-    - message    → what you want to say
-    - session_id → any string, keep same across conversation
+    2 fields:
+    - token   → your accessToken
+    - message → what you want to say
+
+    session_id is automatically taken from user_id inside your token.
     """
 
     # Step 1 — Validate token locally. Raises 401 if invalid or expired.
@@ -130,16 +130,19 @@ async def chat(
     role    = extract_role(payload)
     user_id = extract_user_id(payload)
 
+    # Step 3 — session_id is automatically the user_id — unique per person
+    session_id = user_id
+
     print(f"[AUTH] user_id={user_id} role={role} session={session_id}")
 
-    # Step 3 — Get or create session
+    # Step 4 — Get or create session
     kora, lock = get_or_create_session(session_id, token, role)
 
-    # Step 4 — Prepend role so agent knows who is talking
+    # Step 5 — Prepend role so agent knows who is talking
     role_label = "EMPLOYEE" if role == "employee" else "USER"
     full_input = f"[ROLE: {role_label}]\n{message}"
 
-    # Step 5 — Run agent
+    # Step 6 — Run agent
     async with lock:
         result = await asyncio.get_event_loop().run_in_executor(
             None,
@@ -189,12 +192,14 @@ async def validate_token(token: str):
     Useful for debugging before using /chat.
     """
     payload = validate_and_decode(token)
+    user_id = extract_user_id(payload)
     return {
-        "valid":   True,
-        "user_id": extract_user_id(payload),
-        "role":    payload.get("role"),
-        "email":   payload.get("email"),
-        "expires": payload.get("exp"),
+        "valid":      True,
+        "user_id":    user_id,
+        "session_id": user_id,
+        "role":       payload.get("role"),
+        "email":      payload.get("email"),
+        "expires":    payload.get("exp"),
     }
 
 
