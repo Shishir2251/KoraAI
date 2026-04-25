@@ -7,4 +7,4 @@ uvicorn
 requests
 pydantic
 pymongo
-
+python-multipart
