@@ -7,3 +7,5 @@ uvicorn
 requests
 pydantic
 pymongo
+python-multipart
+PyJWT
