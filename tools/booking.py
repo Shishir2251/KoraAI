@@ -43,7 +43,7 @@ def make_booking_tools(token: str, role: str):
         Inputs: employee_id, date (YYYY-MM-DD)
         """
         result = api_client.api_get(
-            "/api/v1/appointment/available-slots",
+            "/api/v1/appointments/available-slots",
             token,
             params={"employee": employee_id, "date": date}
         )
@@ -108,7 +108,7 @@ def make_booking_tools(token: str, role: str):
             "endTime":         end_time,
             "bookingNotes":    booking_notes,
         }
-        result = api_client.api_post("/api/v1/appointment/", token, body)
+        result = api_client.api_post("/api/v1/appointments/", token, body)
 
         if "error" in result:
             return f"Booking failed: {result['error']}"
@@ -131,7 +131,7 @@ def make_booking_tools(token: str, role: str):
         Input: status — all, upcoming, completed, cancelled
         """
         result = api_client.api_get(
-            "/api/v1/appointment",
+            "/api/v1/appointments",
             token,
             params={"status": status}
         )
@@ -164,7 +164,7 @@ def make_booking_tools(token: str, role: str):
         Input: date — YYYY-MM-DD
         """
         result = api_client.api_get(
-            "/api/v1/appointment",
+            "/api/v1/appointments",
             token,
             params={"status": "all"}
         )
@@ -200,7 +200,7 @@ def make_booking_tools(token: str, role: str):
         Input: appointment_id — MongoDB _id
         """
         result = api_client.api_get(
-            f"/api/v1/appointment/{appointment_id}",
+            f"/api/v1/appointments/{appointment_id}",
             token
         )
 
@@ -244,7 +244,7 @@ def make_booking_tools(token: str, role: str):
                 "You cannot reschedule. Please ask the client to update their booking."
             )
 
-        check = api_client.api_get(f"/api/v1/appointment/{appointment_id}", token)
+        check = api_client.api_get(f"/api/v1/appointments/{appointment_id}", token)
         if "error" not in check:
             appt   = check.get("data", {})
             if isinstance(appt, list):
@@ -254,7 +254,7 @@ def make_booking_tools(token: str, role: str):
                 return f"Cannot reschedule — appointment is already {status.upper()}."
 
         result = api_client.api_put(
-            f"/api/v1/appointment/{appointment_id}",
+            f"/api/v1/appointments/{appointment_id}",
             token,
             {
                 "appointmentDate": new_date,
@@ -285,7 +285,7 @@ def make_booking_tools(token: str, role: str):
                 "You cannot cancel. Please ask the client to cancel their booking."
             )
 
-        check = api_client.api_get(f"/api/v1/appointment/{appointment_id}", token)
+        check = api_client.api_get(f"/api/v1/appointments/{appointment_id}", token)
         if "error" not in check:
             appt = check.get("data", {})
             if isinstance(appt, list):
@@ -297,7 +297,7 @@ def make_booking_tools(token: str, role: str):
                 return f"Cannot cancel — appointment is {status.upper()}."
 
         result = api_client.api_put(
-            f"/api/v1/appointment/{appointment_id}",
+            f"/api/v1/appointments/{appointment_id}",
             token,
             {"status": "cancelled"}
         )
