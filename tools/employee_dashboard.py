@@ -18,7 +18,7 @@ def make_employee_tools(token: str):
         """View today's appointments for the logged-in employee. No input needed."""
         today  = date_lib.today().strftime("%Y-%m-%d")
         result = api_client.api_get(
-            "/api/v1/appointment/",
+            "/api/v1/appointments",
             token,
             params={"status": "all"}
         )
@@ -54,7 +54,7 @@ def make_employee_tools(token: str):
         Inputs: month (number e.g. '4'), year (e.g. '2026')
         """
         result = api_client.api_get(
-            "/api/v1/appointment/employee/calendar",
+            "/api/v1/appointments/employee/calendar",
             token,
             params={"month": month, "year": year}
         )

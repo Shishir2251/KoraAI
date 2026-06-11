@@ -28,6 +28,16 @@ app.add_middleware(
 sessions: dict = {}
 
 
+# ── Startup diagnostics ────────────────────────────────────
+
+def warn_if_short_jwt_secret():
+    if JWT_ACCESS_SECRET and len(JWT_ACCESS_SECRET) < 32:
+        print(
+            "[JWT WARNING] JWT_ACCESS_SECRET is shorter than 32 bytes. "
+            "This works, but a longer secret is recommended for HS256."
+        )
+
+
 # ── Token validation ───────────────────────────────────────
 
 def validate_and_decode(token: str) -> dict:
@@ -96,6 +106,7 @@ async def cleanup_expired_sessions():
 
 @app.on_event("startup")
 async def startup_event():
+    warn_if_short_jwt_secret()
     asyncio.create_task(cleanup_expired_sessions())
 
 
@@ -169,6 +180,16 @@ def clear_session(session_id: str):
 
 
 # ── Health check ───────────────────────────────────────────
+
+@app.get("/")
+def root():
+    return {
+        "status": "KoraAI Agent API is running",
+        "docs": "/docs",
+        "health": "/health",
+        "chat": "/chat",
+    }
+
 
 @app.get("/health")
 def health():

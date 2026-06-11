@@ -264,13 +264,13 @@ All tools call these backend endpoints:
 
 | Action | Method | Endpoint |
 |--------|--------|----------|
-| Available slots | GET | `/api/v1/appointment/available-slots?employee=ID&date=YYYY-MM-DD` |
-| Create appointment | POST | `/api/v1/appointment/` |
-| Get appointments | GET | `/api/v1/appointment?status=all` |
-| Single appointment | GET | `/api/v1/appointment/{id}` |
-| Reschedule | PUT | `/api/v1/appointment/{id}` |
-| Cancel | PUT | `/api/v1/appointment/{id}` |
-| Employee calendar | GET | `/api/v1/appointment/employee/calendar?month=4&year=2026` |
+| Available slots | GET | `/api/v1/appointments/available-slots?employee=ID&date=YYYY-MM-DD` |
+| Create appointment | POST | `/api/v1/appointments/` |
+| Get appointments | GET | `/api/v1/appointments?status=all` |
+| Single appointment | GET | `/api/v1/appointments/{id}` |
+| Reschedule | PUT | `/api/v1/appointments/{id}` |
+| Cancel | PUT | `/api/v1/appointments/{id}` |
+| Employee calendar | GET | `/api/v1/appointments/employee/calendar?month=4&year=2026` |
 | Leave list | GET | `/api/v1/work/leave` |
 | Leave balance | GET | `/api/v1/work/leave-balance` |
 | Single leave | GET | `/api/v1/work/leave/{id}` |
